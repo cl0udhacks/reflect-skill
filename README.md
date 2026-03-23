@@ -87,7 +87,19 @@ High-frequency experiences survive longer. Something triggered 5 times over 120 
 
 ## Installation
 
-### 1. Copy the skill files
+### Quick Install (recommended)
+
+```bash
+git clone https://github.com/cl0udhacks/reflect-skill.git
+cd reflect-skill
+./install.sh
+```
+
+The installer auto-detects Claude Code, asks where to put skills and memory, and optionally sets up the auto-trigger hook. Takes about 30 seconds.
+
+### Manual Install
+
+#### 1. Copy the skill files
 
 Copy the `skills/` directory into your project's skill directory.
 
