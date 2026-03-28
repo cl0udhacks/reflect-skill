@@ -4,13 +4,13 @@ Two enhancements to the Hermes agent memory system that improve cross-session le
 
 ## Problem
 
-Hermes agents have an 8,000-character memory (MEMORY.md) that persists across sessions and is injected into every turn. The daily session reset at 4 AM ET prompts agents to save "important facts" before context is cleared.
+Hermes agents have an 8,000-character memory (MEMORY.md) that persists across sessions and is injected into every turn. The daily session reset prompts agents to save "important facts" before context is cleared.
 
 Two problems emerged:
 
 1. **Agents only saved facts, not lessons.** If you corrected an agent's behavior ("don't quote pricing from memory, check the page first"), that correction died with the session. Next day, the agent made the same mistake because the *lesson* was never saved — only factual state.
 
-2. **Memory bloated with session logs.** Agents treated memory as a diary — re-saving pricing data on every session, logging "verified on March 27", "verified on March 28", saving browser tool status repeatedly. One agent hit 95% capacity with mostly duplicate entries.
+2. **Memory bloated with session logs.** Agents treated memory as a diary — re-saving the same data every session, logging "verified on March 27", "verified on March 28", saving tool status repeatedly. One agent hit 95% capacity with mostly duplicate entries.
 
 ## Enhancement 1: Reflect Skill
 
@@ -24,11 +24,11 @@ Adds three categories of experience extraction that the default session reset do
 |----------|--------|--------|---------|
 | Corrections | `[CORR]` | User said "no", "don't", rejected approach | "Don't quote pricing from memory" |
 | Validated Approaches | `[VALID]` | User confirmed non-obvious choice | "Bullet-point standup format works well" |
-| Architectural Decisions | `[ARCH]` | Workflow or process settled | "Social posts go through Angela first" |
+| Architectural Decisions | `[ARCH]` | Workflow or process settled | "Reports go through the team lead first" |
 
 Each entry follows a structured format:
 ```
-[CORR] Don't quote pricing from memory — always check the live pricing page first | Why: Quoted outdated Lantern pricing, missed tiers | Apply: Use browser tools before any pricing discussion (×2, 2026-03-28)
+[CORR] Don't quote pricing from memory — always check the live pricing page first | Why: Quoted outdated pricing, missed new tiers | Apply: Use browser tools before any pricing discussion (×2, 2026-03-28)
 ```
 
 The `×N` frequency counter and date enable self-managed decay — high-frequency lessons survive, one-off corrections can be dropped when memory is tight.
@@ -47,40 +47,35 @@ The skill implements four phases:
 The skill file goes in each agent's skills directory:
 
 ```
-/home/<user>/.hermes/skills/reflect/SKILL.md          # michael
-/home/<user>/.hermes-angela/skills/reflect/SKILL.md    # angela
-/home/<user>/.hermes-jim/skills/reflect/SKILL.md       # jim
-/home/<user>/.hermes-robert/skills/reflect/SKILL.md    # robert
-/home/<user>/.hermes-dwight/skills/reflect/SKILL.md    # dwight
-/home/<user>/.hermes-kelly/skills/reflect/SKILL.md     # kelly
+~/.hermes/skills/reflect/SKILL.md                # primary agent
+~/.hermes-<agent-name>/skills/reflect/SKILL.md   # additional agents
 ```
 
-Deploy to all agents:
+Deploy to multiple agents:
 ```bash
-# From local machine
 scp skills/reflect/SKILL.md <server>:/tmp/reflect-skill.md
-ssh <server> 'for agent in "" "-angela" "-jim" "-robert" "-dwight" "-kelly"; do
-  mkdir -p "/home/<user>/.hermes${agent}/skills/reflect"
-  cp /tmp/reflect-skill.md "/home/<user>/.hermes${agent}/skills/reflect/SKILL.md"
+ssh <server> 'for agent in "" "-agent2" "-agent3"; do
+  mkdir -p "$HOME/.hermes${agent}/skills/reflect"
+  cp /tmp/reflect-skill.md "$HOME/.hermes${agent}/skills/reflect/SKILL.md"
 done && rm /tmp/reflect-skill.md'
 ```
 
 Restart agents to load:
 ```bash
-ssh <server> 'for c in hermes-gateway hermes-angela hermes-jim hermes-robert hermes-dwight hermes-kelly; do
+ssh <server> 'for c in hermes-primary hermes-agent2 hermes-agent3; do
   sudo docker exec "$c" python3 -c "import os, signal; os.kill(1, signal.SIGUSR1)" 2>/dev/null || sudo docker restart "$c"
 done'
 ```
 
 Verify registration:
 ```bash
-ssh <server> 'sudo docker exec hermes-gateway /app/venv/bin/hermes skills list 2>&1 | grep reflect'
+sudo docker exec <container> /app/venv/bin/hermes skills list 2>&1 | grep reflect
 ```
 
 ### Usage
 
 - **Manual:** Message an agent `/reflect` at any point during a conversation
-- **Session reset:** Agents apply reflect principles during the daily 4 AM automatic session reset when prompted to save memory
+- **Session reset:** Agents apply reflect principles during the daily automatic session reset when prompted to save memory
 - **After corrections:** Agents should proactively save `[CORR]` entries when corrected, even without explicitly invoking the skill
 
 ### Design decisions
@@ -112,41 +107,34 @@ Your memory has an 8,000 character hard limit. Treat it as premium storage — e
 
 ### What belongs in memory
 - Durable facts that change rarely (team structure, product names, pricing tiers)
-- Behavioral lessons from corrections — these prevent Sean from repeating himself
+- Behavioral lessons from corrections — these prevent the user from repeating themselves
 - Settled decisions and workflows that affect how you operate
 - Key blockers or dependencies you need to track across sessions
 
 ### What does NOT belong in memory
 - Session timestamps or "verified on date X" entries — memory is not a log
 - Duplicate entries — if pricing is already saved, do not save it again, update the existing entry
-- Status updates that belong in /shared/ docs (project progress, launch checklists)
+- Status updates that belong in shared docs (project progress, launch checklists)
 - Browser tool status, tool debugging notes, or infrastructure state
-- Research plans or task lists — those belong in session context or /shared/
+- Research plans or task lists — those belong in session context or shared docs
 
 ### Memory hygiene
 - One entry per topic. Merge, do not accumulate.
 - Before saving, scan existing memory for overlap. Update > create.
 - When memory exceeds 70%, compress verbose entries and drop stale ones.
-- Factual entries that are also in /shared/ docs can be removed from memory — you can always read the file.
+- Factual entries that are also in shared docs can be removed from memory — you can always read the file.
 - Behavioral lessons ([CORR], [VALID], [ARCH]) outrank factual entries when space is tight.
 ```
 
 ### Installation
 
-The rules are appended to each agent's SOUL.md on the server:
+Append to each agent's SOUL.md (idempotent — checks before appending):
 
-```
-/home/<user>/.hermes/SOUL.md          # michael
-/home/<user>/.hermes-angela/SOUL.md   # angela
-/home/<user>/.hermes-jim/SOUL.md      # jim
-/home/<user>/.hermes-robert/SOUL.md   # robert
-/home/<user>/.hermes-dwight/SOUL.md   # dwight
-/home/<user>/.hermes-kelly/SOUL.md    # kelly
-```
-
-To add to all agents (idempotent — checks before appending):
 ```bash
-ssh <server> 'MEMORY_RULES=$(cat <<'"'"'RULES'"'"'
+for agent in "" "-agent2" "-agent3"; do
+  file="$HOME/.hermes${agent}/SOUL.md"
+  if ! grep -q "## Memory Rules" "$file" 2>/dev/null; then
+    cat >> "$file" << 'EOF'
 
 ## Memory Rules
 
@@ -154,32 +142,26 @@ Your memory has an 8,000 character hard limit. Treat it as premium storage — e
 
 ### What belongs in memory
 - Durable facts that change rarely (team structure, product names, pricing tiers)
-- Behavioral lessons from corrections — these prevent Sean from repeating himself
+- Behavioral lessons from corrections — these prevent the user from repeating themselves
 - Settled decisions and workflows that affect how you operate
 - Key blockers or dependencies you need to track across sessions
 
 ### What does NOT belong in memory
 - Session timestamps or "verified on date X" entries — memory is not a log
 - Duplicate entries — if pricing is already saved, do not save it again, update the existing entry
-- Status updates that belong in /shared/ docs (project progress, launch checklists)
+- Status updates that belong in shared docs (project progress, launch checklists)
 - Browser tool status, tool debugging notes, or infrastructure state
-- Research plans or task lists — those belong in session context or /shared/
+- Research plans or task lists — those belong in session context or shared docs
 
 ### Memory hygiene
 - One entry per topic. Merge, do not accumulate.
 - Before saving, scan existing memory for overlap. Update > create.
 - When memory exceeds 70%, compress verbose entries and drop stale ones.
-- Factual entries that are also in /shared/ docs can be removed from memory — you can always read the file.
+- Factual entries that are also in shared docs can be removed from memory — you can always read the file.
 - Behavioral lessons ([CORR], [VALID], [ARCH]) outrank factual entries when space is tight.
-RULES
-)
-
-for agent in "" "-angela" "-jim" "-robert" "-dwight" "-kelly"; do
-  file="/home/<user>/.hermes${agent}/SOUL.md"
-  if ! grep -q "## Memory Rules" "$file" 2>/dev/null; then
-    echo "$MEMORY_RULES" >> "$file"
+EOF
   fi
-done'
+done
 ```
 
 ### Design decisions
@@ -212,7 +194,7 @@ done'
 │  ├── Agent can invoke /reflect manually                 │
 │  └── Corrections saved proactively as [CORR]            │
 │                                                          │
-│  At session reset (4 AM):                               │
+│  At session reset (daily):                              │
 │  ├── System prompts "save important facts"              │
 │  ├── Agent applies reflect extraction principles        │
 │  ├── Saves behavioral lessons + factual updates         │
@@ -225,43 +207,40 @@ done'
 
 Check memory health across all agents:
 ```bash
-ssh <server> 'for agent in "" "-angela" "-jim" "-robert" "-dwight" "-kelly"; do
-  file="/home/<user>/.hermes${agent}/memories/MEMORY.md"
+for agent in "" "-agent2" "-agent3"; do
+  file="$HOME/.hermes${agent}/memories/MEMORY.md"
   chars=$(wc -c < "$file" 2>/dev/null || echo "0")
   pct=$((chars * 100 / 8000))
-  name=$(echo ".hermes${agent}" | sed "s/^\.hermes-//" | sed "s/^\.hermes$/michael/")
-  echo "$name: ${chars} chars (${pct}%)"
-done'
+  echo ".hermes${agent}: ${chars} chars (${pct}%)"
+done
 ```
 
 Check for experience entries:
 ```bash
-ssh <server> 'for agent in "" "-angela" "-jim" "-robert" "-dwight" "-kelly"; do
-  file="/home/<user>/.hermes${agent}/memories/MEMORY.md"
-  name=$(echo ".hermes${agent}" | sed "s/^\.hermes-//" | sed "s/^\.hermes$/michael/")
+for agent in "" "-agent2" "-agent3"; do
+  file="$HOME/.hermes${agent}/memories/MEMORY.md"
   corr=$(grep -c "^\[CORR\]" "$file" 2>/dev/null || echo "0")
   valid=$(grep -c "^\[VALID\]" "$file" 2>/dev/null || echo "0")
   arch=$(grep -c "^\[ARCH\]" "$file" 2>/dev/null || echo "0")
-  echo "$name: ${corr} corrections, ${valid} validated, ${arch} decisions"
-done'
+  echo ".hermes${agent}: ${corr} corrections, ${valid} validated, ${arch} decisions"
+done
 ```
 
 ## Rollback
 
 **Remove reflect skill:**
 ```bash
-ssh <server> 'for agent in "" "-angela" "-jim" "-robert" "-dwight" "-kelly"; do
-  rm -rf "/home/<user>/.hermes${agent}/skills/reflect"
-done'
+for agent in "" "-agent2" "-agent3"; do
+  rm -rf "$HOME/.hermes${agent}/skills/reflect"
+done
 ```
 
 **Remove memory rules from SOUL.md:**
 ```bash
-# Manually edit each SOUL.md and remove everything from "## Memory Rules" to end of file
-ssh <server> 'for agent in "" "-angela" "-jim" "-robert" "-dwight" "-kelly"; do
-  file="/home/<user>/.hermes${agent}/SOUL.md"
+for agent in "" "-agent2" "-agent3"; do
+  file="$HOME/.hermes${agent}/SOUL.md"
   sed -i "/^## Memory Rules$/,\$d" "$file"
-done'
+done
 ```
 
 **Remove experience entries from memory:**
@@ -272,11 +251,11 @@ done'
 
 After any rollback, restart agents:
 ```bash
-ssh <server> 'for c in hermes-gateway hermes-angela hermes-jim hermes-robert hermes-dwight hermes-kelly; do
+for c in hermes-primary hermes-agent2 hermes-agent3; do
   sudo docker exec "$c" python3 -c "import os, signal; os.kill(1, signal.SIGUSR1)" 2>/dev/null || sudo docker restart "$c"
-done'
+done
 ```
 
 ## Credits
 
-Inspired by [reflect-skill](https://github.com/cl0udhacks/reflect-skill) by cl0udhacks, adapted for Hermes Agent's native memory system.
+Adapted from [reflect-skill](https://github.com/cl0udhacks/reflect-skill) for [Hermes Agent](https://github.com/NousResearch/hermes-agent)'s native memory system.
